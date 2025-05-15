@@ -10,20 +10,20 @@ public class Orders {
     public String clerk;
     public String shippriority;
     public String comment;
+    public String opType; // "INSERT" or "DELETE"
 
-    public Orders() {}
-
-    public Orders(String[] fields) {
-        // fields[0] = OR1
-        this.orderkey = fields[1];
-        this.custkey = fields[2];
-        this.orderstatus = fields[3];
-        this.totalprice = fields[4];
-        this.orderdate = fields[5];
-        this.orderpriority = fields[6];
-        this.clerk = fields[7];
-        this.shippriority = fields[8];
-        this.comment = fields[9];
+    public Orders(String[] fields, String opType) {
+        // fields[0]已经只保留数字
+        this.orderkey = fields[0];
+        this.custkey = fields[1];
+        this.orderstatus = fields[2];
+        this.totalprice = fields[3];
+        this.orderdate = fields[4];
+        this.orderpriority = fields[5];
+        this.clerk = fields[6];
+        this.shippriority = fields[7];
+        this.comment = fields[8];
+        this.opType = opType;
     }
 
     @Override
@@ -32,6 +32,7 @@ public class Orders {
                 "orderkey='" + orderkey + '\'' +
                 ", custkey='" + custkey + '\'' +
                 ", orderdate='" + orderdate + '\'' +
+                ", opType='" + opType + '\'' +
                 '}';
     }
 }

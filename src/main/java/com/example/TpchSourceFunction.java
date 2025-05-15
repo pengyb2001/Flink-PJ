@@ -19,22 +19,30 @@ public class TpchSourceFunction implements SourceFunction<Tuple2<String, Object>
         try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
             String line;
             while (isRunning && (line = br.readLine()) != null) {
-                if (line.startsWith("+LI")) {
-                    String[] fields = line.substring(1).split("\\|", -1);
-                    if (fields.length >= 17) {
-                        Lineitem li = new Lineitem(fields);
+                if (line.length() < 3) continue;
+                String opType = line.startsWith("+") ? "INSERT" : (line.startsWith("-") ? "DELETE" : "UNKNOWN");
+                // 剔除首位符号
+                String content = line.substring(1);
+                if (content.startsWith("LI")) {
+                    String[] fields = content.substring(2).split("\\|", -1);
+                    // 提取 key，只保留数字（orderkey）
+                    if (fields.length >= 16) {
+                        fields[0] = fields[0].replaceAll("[^0-9]", "");
+                        Lineitem li = new Lineitem(fields, opType);
                         ctx.collect(Tuple2.of("lineitem", li));
                     }
-                } else if (line.startsWith("+OR")) {
-                    String[] fields = line.substring(1).split("\\|", -1);
-                    if (fields.length >= 10) {
-                        Orders or = new Orders(fields);
+                } else if (content.startsWith("OR")) {
+                    String[] fields = content.substring(2).split("\\|", -1);
+                    if (fields.length >= 9) {
+                        fields[0] = fields[0].replaceAll("[^0-9]", "");
+                        Orders or = new Orders(fields, opType);
                         ctx.collect(Tuple2.of("orders", or));
                     }
-                } else if (line.startsWith("+CU")) {
-                    String[] fields = line.substring(1).split("\\|", -1);
-                    if (fields.length >= 9) {
-                        Customer cu = new Customer(fields);
+                } else if (content.startsWith("CU")) {
+                    String[] fields = content.substring(2).split("\\|", -1);
+                    if (fields.length >= 8) {
+                        fields[0] = fields[0].replaceAll("[^0-9]", "");
+                        Customer cu = new Customer(fields, opType);
                         ctx.collect(Tuple2.of("customer", cu));
                     }
                 }

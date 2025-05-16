@@ -1,7 +1,6 @@
 package com.example;
 
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.BroadcastStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -33,7 +32,7 @@ public class MainApp {
                 .keyBy(c -> c.custkey)
                 .process(new CustomerProcessFunction());
 
-        // 3. 将活跃customer流转为broadcast流
+        // 3. 将活跃customer流转为broadcast流，供orders join
         BroadcastStream<Customer> customerBroadcast = activeCustomerStream
                 .broadcast(OrdersProcessFunction.CUSTOMER_BROADCAST_STATE_DESC);
 
@@ -43,9 +42,19 @@ public class MainApp {
                 .connect(customerBroadcast)
                 .process(new OrdersProcessFunction());
 
-        // 5. 验证输出
-        activeOrdersStream.print("ActiveOrders").setParallelism(1);
+        // 5. 将活跃orders流转为broadcast流，供lineitem join
+        BroadcastStream<Orders> ordersBroadcast = activeOrdersStream
+                .broadcast(LineitemProcessFunction.ORDERS_BROADCAST_STATE_DESC);
 
-        env.execute("Cquirrel Orders Process Demo");
+        // 6. join lineitem和活跃orders，仅保留完全有效行
+        DataStream<JoinedTuple> joinedStream = lineitemStream
+                .keyBy(li -> li.orderkey)
+                .connect(ordersBroadcast)
+                .process(new LineitemProcessFunction());
+
+        // 7. 输出join结果（为后续聚合做准备）
+        joinedStream.print("JoinedLineitem").setParallelism(1);
+
+        env.execute("Cquirrel Q3 Multi-Stage Demo");
     }
 }

@@ -52,9 +52,15 @@ public class MainApp {
                 .connect(ordersBroadcast)
                 .process(new LineitemProcessFunction());
 
-        // 7. 输出join结果（为后续聚合做准备）
-        joinedStream.print("JoinedLineitem").setParallelism(1);
+        // 打印调试信息
+//        joinedStream.print("DEBUG-JoinedTuple").setParallelism(1);
+        // 7. group by l_orderkey, o_orderdate, o_shippriority，流式增删聚合
+        joinedStream
+                .keyBy(t -> new GroupKey(t.orderkey, t.orderdate, t.shippriority))
+                .process(new GroupByAggregateFunction())
+                .addSink(new AppendFileSink<>("q3result_output_" + System.currentTimeMillis() + ".txt"))
+                .setParallelism(1);
 
-        env.execute("Cquirrel Q3 Multi-Stage Demo");
+        env.execute("Cquirrel Q3 Full Incremental Streaming");
     }
 }

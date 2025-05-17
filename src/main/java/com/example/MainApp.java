@@ -52,15 +52,21 @@ public class MainApp {
                 .connect(ordersBroadcast)
                 .process(new LineitemProcessFunction());
 
-        // 打印调试信息
-//        joinedStream.print("DEBUG-JoinedTuple").setParallelism(1);
         // 7. group by l_orderkey, o_orderdate, o_shippriority，流式增删聚合
-        joinedStream
+        DataStream<String> q3ResultStream = joinedStream
                 .keyBy(t -> new GroupKey(t.orderkey, t.orderdate, t.shippriority))
-                .process(new GroupByAggregateFunction())
-                .addSink(new AppendFileSink<>("q3result_output_" + System.currentTimeMillis() + ".txt"))
+                .process(new GroupByAggregateFunction());
+
+        // 8. 实时写入增删流结果到 txt（每次 run 都 append，可对比）
+        q3ResultStream
+                .addSink(new AppendFileSink<>("q3result_output.txt"))
                 .setParallelism(1);
 
-        env.execute("Cquirrel Q3 Full Incremental Streaming");
+        // 9. 程序结束时自动输出“Q3最终快照”（所有group，包括revenue=0）
+        q3ResultStream
+                .addSink(new Q3SnapshotSink())
+                .setParallelism(1);
+
+        env.execute("Cquirrel Q3 Full Incremental Streaming with Final Snapshot");
     }
 }

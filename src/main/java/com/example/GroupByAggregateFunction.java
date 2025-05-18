@@ -25,6 +25,10 @@ public class GroupByAggregateFunction extends KeyedProcessFunction<GroupKey, Joi
         } else if ("DELETE".equalsIgnoreCase(value.opType)) {
             curr -= delta;
         }
+        // 小于一定量为0
+        if (curr < 0.00000001) {
+            curr = 0.0;
+        }
         sumRevenue.update(curr);
 
         // 输出最新聚合值（你可按需只输出INSERT时、变化时、或周期性输出）

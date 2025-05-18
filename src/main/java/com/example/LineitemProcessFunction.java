@@ -1,70 +1,75 @@
 package com.example;
 
+import org.apache.flink.api.common.state.MapState;
 import org.apache.flink.api.common.state.MapStateDescriptor;
-import org.apache.flink.api.common.state.ReadOnlyBroadcastState;
-import org.apache.flink.api.common.state.BroadcastState;
-import org.apache.flink.api.common.state.ValueState;
-import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.functions.co.KeyedBroadcastProcessFunction;
+import org.apache.flink.streaming.api.functions.co.KeyedCoProcessFunction;
 import org.apache.flink.util.Collector;
 
-public class LineitemProcessFunction extends KeyedBroadcastProcessFunction<String, Lineitem, Orders, JoinedTuple> {
+// 注意这里泛型：key为String(orderkey)，第一个流为Lineitem，第二个流为Orders
+public class LineitemProcessFunction extends KeyedCoProcessFunction<String, Lineitem, Orders, JoinedTuple> {
 
-    public static final MapStateDescriptor<String, Orders> ORDERS_BROADCAST_STATE_DESC =
-            new MapStateDescriptor<>("ordersBroadcastState", String.class, Orders.class);
-
-    // 记录当前 lineitem 是否“活跃”（方便 delete 流时判断）
-    private transient ValueState<Boolean> isLineitemActive;
+    // 存储活跃的Orders
+    private transient MapState<String, Orders> ordersState;
+    
+    // 记录Lineitem是否活跃
+    private transient MapState<String, Boolean> lineitemActiveState;
 
     @Override
-    public void open(Configuration parameters) {
-        ValueStateDescriptor<Boolean> desc = new ValueStateDescriptor<>("isLineitemActive", Boolean.class);
-        isLineitemActive = getRuntimeContext().getState(desc);
+    public void open(Configuration parameters) throws Exception {
+        MapStateDescriptor<String, Orders> ordersStateDesc = 
+            new MapStateDescriptor<>("ordersState", String.class, Orders.class);
+        ordersState = getRuntimeContext().getMapState(ordersStateDesc);
+        
+        MapStateDescriptor<String, Boolean> lineitemActiveStateDesc = 
+            new MapStateDescriptor<>("lineitemActiveState", String.class, Boolean.class);
+        lineitemActiveState = getRuntimeContext().getMapState(lineitemActiveStateDesc);
     }
 
-    // Lineitem流
+    // 处理Lineitem流
     @Override
-    public void processElement(Lineitem li, ReadOnlyContext ctx, Collector<JoinedTuple> out) throws Exception {
-        ReadOnlyBroadcastState<String, Orders> ordersState = ctx.getBroadcastState(ORDERS_BROADCAST_STATE_DESC);
-
-        // 必须 order 先活跃
-        Orders order = ordersState.get(li.orderkey);
-        if (order == null) {
-            return; // 没有关联 order，不处理
-        }
-
+    public void processElement1(Lineitem li, Context ctx, Collector<JoinedTuple> out) throws Exception {
         // 只处理 l_shipdate > 1995-03-13
         if (li.shipdate.compareTo("1995-03-13") <= 0) {
             return;
         }
-
-        // insert
+        
+        // 检查是否有匹配的活跃Orders
+        Orders order = ordersState.get(li.orderkey);
+        if (order == null) {
+            return; // 没有关联的活跃订单，不处理
+        }
+        
+        // 生成唯一键用于跟踪此Lineitem状态
+        String lineitemKey = li.orderkey + "_" + li.linenumber;
+        
+        // 处理Lineitem操作
         if ("INSERT".equalsIgnoreCase(li.opType)) {
-            Boolean prev = isLineitemActive.value();
-            if (prev == null || !prev) {
-                isLineitemActive.update(true);
-                out.collect(new JoinedTuple(li, order, "INSERT"));
+            Boolean isActive = lineitemActiveState.get(lineitemKey);
+            if (isActive == null || !isActive) {
+                lineitemActiveState.put(lineitemKey, true);
+                out.collect(new JoinedTuple(li, order, "INSERT")); // 输出Join结果
             }
-        }
-        // delete
-        else if ("DELETE".equalsIgnoreCase(li.opType)) {
-            Boolean prev = isLineitemActive.value();
-            if (prev != null && prev) {
-                isLineitemActive.update(false);
-                out.collect(new JoinedTuple(li, order, "DELETE"));
+        } else if ("DELETE".equalsIgnoreCase(li.opType)) {
+            Boolean isActive = lineitemActiveState.get(lineitemKey);
+            if (isActive != null && isActive) {
+                lineitemActiveState.put(lineitemKey, false);
+                out.collect(new JoinedTuple(li, order, "DELETE")); // 输出删除信号
             }
         }
     }
 
-    // Orders流，广播：增删活跃 order
+    // 处理Orders流
     @Override
-    public void processBroadcastElement(Orders order, Context ctx, Collector<JoinedTuple> out) throws Exception {
-        BroadcastState<String, Orders> ordersState = ctx.getBroadcastState(ORDERS_BROADCAST_STATE_DESC);
+    public void processElement2(Orders order, Context ctx, Collector<JoinedTuple> out) throws Exception {
+        String orderKey = order.orderkey;
+        
         if ("INSERT".equalsIgnoreCase(order.opType)) {
-            ordersState.put(order.orderkey, order);
+            // 对于插入操作，存储订单
+            ordersState.put(orderKey, order);
         } else if ("DELETE".equalsIgnoreCase(order.opType)) {
-            ordersState.remove(order.orderkey);
+            // 对于删除操作，移除订单
+            ordersState.remove(orderKey);
         }
     }
-}
+} 

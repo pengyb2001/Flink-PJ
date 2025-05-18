@@ -1,69 +1,82 @@
 package com.example;
 
+import org.apache.flink.api.common.state.MapState;
 import org.apache.flink.api.common.state.MapStateDescriptor;
-import org.apache.flink.api.common.state.ReadOnlyBroadcastState;
-import org.apache.flink.api.common.state.BroadcastState;
-import org.apache.flink.api.common.state.ValueState;
-import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.functions.co.KeyedBroadcastProcessFunction;
+import org.apache.flink.streaming.api.functions.co.KeyedCoProcessFunction;
 import org.apache.flink.util.Collector;
 
-// 注意这里泛型：key为custkey，左流为Orders，右流为Customer
-public class OrdersProcessFunction extends KeyedBroadcastProcessFunction<String, Orders, Customer, Orders> {
+// 注意这里泛型：key为String(custkey)，第一个流为Orders，第二个流为Customer
+public class OrdersProcessFunction extends KeyedCoProcessFunction<String, Orders, Customer, Orders> {
 
-    // 维护活跃customer的BroadcastState
-    public static final MapStateDescriptor<String, Customer> CUSTOMER_BROADCAST_STATE_DESC =
-            new MapStateDescriptor<>("customerBroadcastState", String.class, Customer.class);
-
-    private transient ValueState<Boolean> isOrderActive;
+    // 存储活跃的Customer
+    private transient MapState<String, Customer> customerState;
+    
+    // 存储每个Order是否活跃
+    private transient MapState<String, Boolean> orderActiveState;
 
     @Override
     public void open(Configuration parameters) throws Exception {
-        ValueStateDescriptor<Boolean> orderActiveDesc = new ValueStateDescriptor<>("isOrderActive", Boolean.class);
-        isOrderActive = getRuntimeContext().getState(orderActiveDesc);
+        MapStateDescriptor<String, Customer> customerStateDesc = 
+            new MapStateDescriptor<>("customerState", String.class, Customer.class);
+        customerState = getRuntimeContext().getMapState(customerStateDesc);
+        
+        MapStateDescriptor<String, Boolean> orderActiveStateDesc = 
+            new MapStateDescriptor<>("orderActiveState", String.class, Boolean.class);
+        orderActiveState = getRuntimeContext().getMapState(orderActiveStateDesc);
     }
 
-    // 处理Orders流（主流，keyBy了custkey）
+    // 处理Orders流
     @Override
-    public void processElement(Orders order, ReadOnlyContext ctx, Collector<Orders> out) throws Exception {
-        ReadOnlyBroadcastState<String, Customer> customerState = ctx.getBroadcastState(CUSTOMER_BROADCAST_STATE_DESC);
-
+    public void processElement1(Orders order, Context ctx, Collector<Orders> out) throws Exception {
         // 1. 仅处理o_orderdate < 1995-03-13
         if (order.orderdate.compareTo("1995-03-13") >= 0) {
             return; // 不满足日期要求，直接忽略
         }
-        // 2. 仅处理活跃customer的orders
-        Customer activeCustomer = customerState.get(order.custkey);
-        if (activeCustomer == null) {
+        
+        // 2. 检查是否有匹配的活跃Customer
+        boolean hasActiveCustomer = false;
+        for (Customer customer : customerState.values()) {
+            if (customer.custkey.equals(order.custkey) && 
+                "AUTOMOBILE".equals(customer.mktsegment)) {
+                hasActiveCustomer = true;
+                break;
+            }
+        }
+        
+        if (!hasActiveCustomer) {
             return; // 没有活跃customer，不处理
         }
-        // 3. 仅插入/删除活跃orders
+
+        // 3. 处理订单操作
+        String orderKey = order.orderkey;
         if ("INSERT".equalsIgnoreCase(order.opType)) {
-            Boolean prev = isOrderActive.value();
-            if (prev == null || !prev) {
-                isOrderActive.update(true);
-                out.collect(order); // 新增活跃order输出
+            Boolean isActive = orderActiveState.get(orderKey);
+            if (isActive == null || !isActive) {
+                orderActiveState.put(orderKey, true);
+                out.collect(order); // 输出活跃订单
             }
         } else if ("DELETE".equalsIgnoreCase(order.opType)) {
-            Boolean prev = isOrderActive.value();
-            if (prev != null && prev) {
-                isOrderActive.update(false);
-                // 如需撤销信号，可输出一条带DELETE标志的order
-                // order.opType = "DELETE";
-                // out.collect(order);
+            Boolean isActive = orderActiveState.get(orderKey);
+            if (isActive != null && isActive) {
+                orderActiveState.put(orderKey, false);
+                out.collect(order); // 输出删除订单的信号
             }
         }
     }
 
-    // 处理Customer流（广播流，实时更新活跃customer索引）
+    // 处理Customer流
     @Override
-    public void processBroadcastElement(Customer customer, Context ctx, Collector<Orders> out) throws Exception {
-        BroadcastState<String, Customer> customerState = ctx.getBroadcastState(CUSTOMER_BROADCAST_STATE_DESC);
+    public void processElement2(Customer customer, Context ctx, Collector<Orders> out) throws Exception {
+        String custKey = customer.custkey;
+        
         if ("INSERT".equalsIgnoreCase(customer.opType)) {
-            customerState.put(customer.custkey, customer);
+            // 只存储符合条件的Customer
+            if ("AUTOMOBILE".equals(customer.mktsegment)) {
+                customerState.put(custKey, customer);
+            }
         } else if ("DELETE".equalsIgnoreCase(customer.opType)) {
-            customerState.remove(customer.custkey);
+            customerState.remove(custKey);
         }
     }
-}
+} 

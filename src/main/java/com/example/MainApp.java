@@ -26,7 +26,7 @@ public class MainApp {
     public static void main(String[] args) throws Exception {
         // 设置流执行环境
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment()
-                .setParallelism(1);
+                .setParallelism(8);
 
         // 注册LocalDate序列化器
         env.getConfig().registerTypeWithKryoSerializer(LocalDate.class, LocalDateSerializer.class);

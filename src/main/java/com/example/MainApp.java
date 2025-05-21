@@ -72,14 +72,14 @@ public class MainApp {
     public static void main(String[] args) throws Exception {
         // 判断是否运行性能测试
 //        boolean runPerformanceTest = (args.length > 0 && "test".equals(args[0]));
-        boolean runPerformanceTest = true; // 默认运行性能测试
+        boolean runPerformanceTest = false; // 默认不运行性能测试
 
         if (runPerformanceTest) {
             // 执行性能测试
             runPerformanceTests();
         } else {
             // 执行单次作业
-            String dataFile = "input_data_all-1gb_1percent.csv";
+            String dataFile = "input_data_all-1gb.csv";
             int parallelism = 8;
 
             // 如果提供了参数，则使用参数

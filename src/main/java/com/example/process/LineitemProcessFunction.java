@@ -27,7 +27,7 @@ public class LineitemProcessFunction extends KeyedCoProcessFunction<Long, Tuple2
     
     // 共享状态管理器
     private SharedStateManager stateManager;
-    
+
     /**
      * 初始化方法
      */
@@ -36,7 +36,7 @@ public class LineitemProcessFunction extends KeyedCoProcessFunction<Long, Tuple2
         // 初始化共享状态管理器
         stateManager = new SharedStateManager(getRuntimeContext());
     }
-    
+
     /**
      * 处理订单事件
      */
@@ -60,7 +60,7 @@ public class LineitemProcessFunction extends KeyedCoProcessFunction<Long, Tuple2
             ));
         }
     }
-    
+
     /**
      * 处理行项目事件
      */

@@ -70,8 +70,8 @@ public class OrderProcessFunction extends KeyedCoProcessFunction<Long, Tuple2<Lo
         // 跳过不符合日期条件的订单
         if (!orderDate.isBefore(DATE_THRESHOLD)) {
             return;
-        }
-        
+    }
+    
         // 根据操作类型处理订单
         if (operation.equals(OP_ADD)) {
             // 关联订单和客户
@@ -79,8 +79,8 @@ public class OrderProcessFunction extends KeyedCoProcessFunction<Long, Tuple2<Lo
         } else if (operation.equals(OP_DEL)) {
             // 删除订单及其关联信息
             stateManager.removeOrder(orderId);
-        }
-        
+    }
+    
         // 检查客户是否已被筛选，如果是则输出订单
         if (stateManager.isCustomerFiltered(customerId)) {
             out.collect(new Tuple2<>(orderId, operation));

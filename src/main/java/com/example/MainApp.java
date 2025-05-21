@@ -8,6 +8,7 @@ import com.example.util.LocalDateSerializer;
 import com.example.util.ShipDateRevenueSink;
 import com.example.util.TpchSourceFunction;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.JobExecutionResult;
 import org.apache.flink.connector.file.src.FileSource;
 import org.apache.flink.connector.file.src.reader.TextLineInputFormat;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -15,25 +16,155 @@ import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.api.java.tuple.Tuple4;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.core.fs.Path;
 
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * Flink流处理主程序
  * 实现了TPC-H查询的流式处理版本，用于计算特定市场部门客户的订单在特定日期范围内的总收入
  */
 public class MainApp {
+    // 基本路径配置
+    private static final String BASE_PATH = "/Users/pengyibo/Desktop/2025-Spring/IP-Flink/Cquirrel-release/DemoTools/DataGenerator/data-1/";
+
+    // 测试数据集配置
+    private static final List<String> DATA_SETS = Arrays.asList(
+        "input_data_all-1gb_1percent.csv",
+        "input_data_all-1gb_10percent.csv",
+        "input_data_all-1gb_50percent.csv",
+        "input_data_all-1gb_60percent.csv",
+        "input_data_all-1gb_70percent.csv",
+        "input_data_all-1gb_80percent.csv",
+        "input_data_all-1gb_90percent.csv",
+        "input_data_all-1gb.csv"
+    );
+    
+    // 并行度配置
+    private static final List<Integer> PARALLELISM_LEVELS = Arrays.asList(1, 2, 4, 8);
+    
+    // 测试结果记录
+    private static class TestResult {
+        String dataSet;
+        int parallelism;
+        long executionTime;
+        
+        public TestResult(String dataSet, int parallelism, long executionTime) {
+            this.dataSet = dataSet;
+            this.parallelism = parallelism;
+            this.executionTime = executionTime;
+        }
+        
+        @Override
+        public String toString() {
+            return dataSet + "," + parallelism + "," + executionTime;
+        }
+    }
+    
     public static void main(String[] args) throws Exception {
+        // 判断是否运行性能测试
+//        boolean runPerformanceTest = (args.length > 0 && "test".equals(args[0]));
+        boolean runPerformanceTest = true; // 默认运行性能测试
+
+        if (runPerformanceTest) {
+            // 执行性能测试
+            runPerformanceTests();
+        } else {
+            // 执行单次作业
+            String dataFile = "input_data_all-1gb_1percent.csv";
+            int parallelism = 8;
+
+            // 如果提供了参数，则使用参数
+            if (args.length >= 1) {
+                dataFile = args[0];
+            }
+            if (args.length >= 2) {
+                parallelism = Integer.parseInt(args[1]);
+            }
+
+            runJob(dataFile, parallelism);
+        }
+    }
+
+    /**
+     * 执行性能测试
+     */
+    private static void runPerformanceTests() throws Exception {
+        List<TestResult> results = new ArrayList<>();
+        
+        System.out.println("开始性能测试...");
+        System.out.println("====================");
+        
+        // 遍历所有数据集和并行度组合
+        for (String dataSet : DATA_SETS) {
+            for (int parallelism : PARALLELISM_LEVELS) {
+                System.out.printf("测试数据集: %s, 并行度: %d\n", dataSet, parallelism);
+                
+                // 执行作业并记录时间
+                JobExecutionResult result = runJob(dataSet, parallelism);
+                long executionTime = result.getNetRuntime();  // Flink 精确执行时间
+                
+                // 记录结果
+                results.add(new TestResult(dataSet, parallelism, executionTime));
+                
+                System.out.printf("执行时间: %d ms\n", executionTime);
+                System.out.println("--------------------");
+                
+                // 等待一段时间，避免资源竞争
+                Thread.sleep(2000);
+            }
+        }
+        
+        // 输出结果到CSV文件
+        saveResultsToCsv(results);
+    }
+    
+    /**
+     * 将测试结果保存到CSV文件
+     */
+    private static void saveResultsToCsv(List<TestResult> results) throws IOException {
+        // 生成带时间戳的文件名
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+        String fileName = "performance_test_" + timestamp + ".csv";
+        
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName))) {
+            // 写入CSV头
+            writer.write("数据集,并行度,执行时间(ms)");
+            writer.newLine();
+            
+            // 写入测试结果
+            for (TestResult result : results) {
+                writer.write(result.toString());
+                writer.newLine();
+            }
+        }
+        
+        System.out.println("测试结果已保存到: " + fileName);
+    }
+    
+    /**
+     * 执行单次作业
+     */
+    private static JobExecutionResult runJob(String dataFile, int parallelism) throws Exception {
         // 设置流执行环境
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment()
-                .setParallelism(8);
+                .setParallelism(parallelism);
 
         // 注册LocalDate序列化器
         env.getConfig().registerTypeWithKryoSerializer(LocalDate.class, LocalDateSerializer.class);
 
         // 创建文件数据源
+        String filePath = BASE_PATH + dataFile;
         FileSource<String> fileSource = FileSource
-                .forRecordStreamFormat(new TextLineInputFormat(), new org.apache.flink.core.fs.Path("/Users/pengyibo/Desktop/2025-Spring/IP-Flink/flink-ref/input_data_all_70percent.csv"))
+                .forRecordStreamFormat(new TextLineInputFormat(), new Path(filePath))
                 .build();
 
         // 创建输入数据流
@@ -83,12 +214,16 @@ public class MainApp {
                 });
 
         // 第五步：使用自定义接收器整合所有分区的结果并输出
+        // 为测试文件添加前缀，避免覆盖
+        String outputPrefix = "test_" + dataFile.replace(".csv", "") + "_p" + parallelism + "_";
         shipDateRevenueResults
-                .addSink(new ShipDateRevenueSink())
+                .addSink(new ShipDateRevenueSink(outputPrefix))
                 .setParallelism(1);
 
         // 执行作业
-        env.execute("TPC-H流处理作业");
-        System.out.println("作业执行完成");
+        JobExecutionResult result = env.execute("TPC-H流处理作业 [" + dataFile + ", 并行度=" + parallelism + "]");
+        System.out.println("作业执行完成: " + dataFile + ", 并行度=" + parallelism);
+        
+        return result;
     }
 } 
